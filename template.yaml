@@ -1,0 +1,138 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: S3 Uploader - sample application
+
+Parameters:
+  SenderEmail:
+    Type: String
+    Description: Sender email address
+    Default: mazharulboni@gmail.com
+  RecipientEmail:
+    Type: String
+    Description: Recipient email address
+    Default: mhaqboni@gmail.com
+
+Resources:
+  # HTTP API
+  MyApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      # CORS configuration - this is open for development only and should be restricted in prod.
+      # See https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-property-httpapi-httpapicorsconfiguration.html   
+      CorsConfiguration:
+        AllowMethods:
+          - GET
+          - POST
+          - DELETE
+          - OPTIONS
+        AllowHeaders:
+          - "*"   
+        AllowOrigins: 
+          - "*"      
+
+  ## Lambda functions
+  UploadRequestFunction:
+    # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Type: AWS::Serverless::Function 
+    Properties:
+      CodeUri: getSignedURL/
+      Handler: app.handler
+      Runtime: nodejs16.x
+      Timeout: 3
+      MemorySize: 128
+      Environment:
+        Variables:
+          UploadBucket: !Ref S3UploadBucket  
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref S3UploadBucket
+        ## This permission allows the Lambda function to request signed URLs
+        ## for objects that will be publicly readable. Uncomment if you want this ACL.
+        # - Statement:
+        #   - Effect: Allow
+        #     Resource: !Sub 'arn:aws:s3:::${S3UploadBucket}/'
+        #     Action:
+        #       - s3:putObjectAcl
+      Events:
+        UploadAssetAPI:
+          Type: HttpApi
+          Properties:
+            Path: /uploads
+            Method: get
+            ApiId: !Ref MyApi  
+
+  ## S3 bucket
+  S3UploadBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      CorsConfiguration:
+        CorsRules:
+        - AllowedHeaders:
+            - "*"
+          AllowedMethods:
+            - GET
+            - PUT
+            - HEAD
+          AllowedOrigins:
+            - "*"
+
+## Take a note of the outputs for deploying the workflow templates in this sample application
+
+  SendEmailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: SendEmailFunctionDemo
+      Handler: post_processor.lambda_handler
+      Runtime: python3.11
+      CodeUri: post-processor/
+      Description: Lambda function to send email with S3 image attachment
+      MemorySize: 128
+      Timeout: 30
+      Events:
+        S3Event:
+          Type: S3
+          Properties:
+            Bucket: !Ref S3UploadBucket
+            Events: s3:ObjectCreated:*
+      Environment:
+        Variables:
+          SENDER_EMAIL: your_sender_email@example.com
+          RECIPIENT_EMAIL: your_recipient_email@example.com
+      Role: !GetAtt SendEmailFunctionRole.Arn
+
+  SendEmailFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: SendEmailFunctionRoleDemo
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SendEmailPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource: "*"
+
+Outputs:
+  APIendpoint:
+    Description: "HTTP API endpoint URL"
+    Value: !Sub "https://${MyApi}.execute-api.${AWS::Region}.amazonaws.com"
+  S3UploadBucketName:
+    Description: "S3 bucket for application uploads"
+    Value: !Ref 'S3UploadBucket'
+
+
+
+# aws s3 cp index.html s3://izaanschool-demo-app-devops/index.html
+
